@@ -3,7 +3,7 @@ const app = express();
 const cors = require("cors");
 require("dotenv").config();
 const port = process.env.PORT || 9000;
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 // middleware
 app.use(cors());
@@ -51,6 +51,7 @@ async function run() {
       res.send(result);
     });
 
+    // [MyProfile.jsx]
     app.get("/users", async (req, res) => {
       const email = req?.query?.email;
       const query = {};
@@ -58,6 +59,23 @@ async function run() {
         query.email = email;
       }
       const result = await userCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.patch("/users/:id", async (req, res) => {
+      const id = req?.params?.id;
+      const data = req?.body;
+
+      const filter = { _id: new ObjectId(id) };
+      const update = {
+        $set: {
+          name: data?.name,
+          district: data?.district,
+          upazila: data?.upazila,
+          blood_group: data?.blood_group,
+        },
+      };
+      const result = await userCollection.updateOne(filter, update);
       res.send(result);
     });
     // users related api's end
