@@ -26,6 +26,42 @@ app.get("/", (req, res) => {
 async function run() {
   try {
     await client.connect();
+    // --------------------------------------------------------------------
+    const db = client.db("blood_donation_db");
+    const userCollection = db.collection("users");
+
+    // users related api's start
+
+    // [Register.jsx]
+    app.post("/users", async (req, res) => {
+      const userData = req?.body;
+      userData.role = "donor";
+      userData.status = "active";
+      userData.createAt = new Date();
+
+      // check and prevent adding duplicate user data from googleLogin start
+      //   const email = user?.email;
+      //   const userExits = await userCollection.findOne({ email });
+      //   if (userExits) {
+      //     return res.send({ message: "User Exits" });
+      //   }
+      // check and prevent adding duplicate user data from googleLogin end
+
+      const result = await userCollection.insertOne(userData);
+      res.send(result);
+    });
+
+    app.get("/users", async (req, res) => {
+      const email = req?.query?.email;
+      const query = {};
+      if (email) {
+        query.email = email;
+      }
+      const result = await userCollection.find(query).toArray();
+      res.send(result);
+    });
+    // users related api's end
+    // --------------------------------------------------------------------
 
     await client.db("admin").command({ ping: 1 });
     console.log(
