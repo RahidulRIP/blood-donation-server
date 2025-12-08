@@ -29,6 +29,7 @@ async function run() {
     // --------------------------------------------------------------------
     const db = client.db("blood_donation_db");
     const userCollection = db.collection("users");
+    const bloodRequestCollection = db.collection("bloodRequest");
 
     // users related api's start
 
@@ -38,15 +39,6 @@ async function run() {
       userData.role = "donor";
       userData.status = "active";
       userData.createAt = new Date();
-
-      // check and prevent adding duplicate user data from googleLogin start
-      //   const email = user?.email;
-      //   const userExits = await userCollection.findOne({ email });
-      //   if (userExits) {
-      //     return res.send({ message: "User Exits" });
-      //   }
-      // check and prevent adding duplicate user data from googleLogin end
-
       const result = await userCollection.insertOne(userData);
       res.send(result);
     });
@@ -78,7 +70,122 @@ async function run() {
       const result = await userCollection.updateOne(filter, update);
       res.send(result);
     });
+
+    // [AllUser.jsx] update status
+    app.patch("/user/status/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await userCollection.updateOne(query, update);
+      res.send(result);
+    });
+
+    // [AllUser.jsx] update role
+    app.patch("/user/role/:id", async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: {
+          role: role,
+        },
+      };
+      const result = await userCollection.updateOne(query, update);
+      res.send(result);
+    });
     // users related api's end
+
+    // [CreateDonationRequest.jsx]
+    app.post("/create-donation-request", async (req, res) => {
+      const data = req?.body;
+      const user_email = req?.body?.user_email;
+
+      // validate the user status start
+      const query = { email: user_email };
+      const userData = await userCollection.findOne(query);
+      if (userData?.status !== "active") {
+        return res.send({
+          message: "You are not able to create any donation request",
+        });
+      }
+      // validate the user status end
+      data.donation_status = "pending";
+      data.createdAt = new Date();
+      const result = await bloodRequestCollection.insertOne(data);
+      res.send(result);
+    });
+
+    // [DonarHome.jsx]
+    app.get("/create-donation-request", async (req, res) => {
+      const email = req?.query?.email;
+      const query = {};
+      if (email) {
+        query.user_email = email;
+      }
+      const option = { sort: { createdAt: -1 } };
+      const result = await bloodRequestCollection
+        .find(query, option)
+        .limit(3)
+        .toArray();
+      res.send(result);
+    });
+
+    // [MyDonationRequest.jsx]
+    app.get("/create-donation-request/all-data", async (req, res) => {
+      const email = req?.query?.email;
+      const query = {};
+      if (email) {
+        query.user_email = email;
+      }
+      const option = { sort: { createdAt: -1 } };
+      const result = await bloodRequestCollection.find(query, option).toArray();
+      res.send(result);
+    });
+
+    // [UpdateDonarReqData.jsx]
+    app.get("/create-donation-request/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bloodRequestCollection.findOne(query);
+      res.send(result);
+    });
+
+    // [UpdateDonarReqData.jsx]
+    app.patch("/create-donation-request/:id", async (req, res) => {
+      const id = req.params.id;
+      const data = req.body;
+
+      const query = { _id: new ObjectId(id) };
+
+      const update = {
+        $set: {
+          recipient_name: data?.recipient_name,
+          recipient_blood_group: data?.recipient_blood_group,
+          hospital_name: data?.hospital_name,
+          recipient_district: data?.recipient_district,
+          recipient_upazila: data?.recipient_upazila,
+          donation_date: data?.donation_date,
+          donation_time: data?.donation_time,
+          recipient_full_address: data?.recipient_full_address,
+          request_message: data?.request_message,
+        },
+      };
+      const result = await bloodRequestCollection.updateOne(query, update);
+      res.send(result);
+    });
+
+    // [UpdateDonarReqData.jsx]
+    app.delete("/create-donation-request/:id", async (req, res) => {
+      const id = req?.params?.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bloodRequestCollection.deleteOne(query);
+      res.send(result);
+    });
     // --------------------------------------------------------------------
 
     await client.db("admin").command({ ping: 1 });
