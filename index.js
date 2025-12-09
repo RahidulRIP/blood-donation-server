@@ -179,6 +179,20 @@ async function run() {
       res.send(result);
     });
 
+    // [DonateBloodCard.jsx]
+    app.patch("/update-donation-status/:id", async (req, res) => {
+      const id = req.params.id;
+      console.log(id);
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: {
+          donation_status: "inprogress",
+        },
+      };
+      const result = await bloodRequestCollection.updateOne(query, update);
+      res.send(result);
+    });
+
     // [UpdateDonarReqData.jsx]
     app.delete("/create-donation-request/:id", async (req, res) => {
       const id = req?.params?.id;
