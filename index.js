@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 const port = process.env.PORT || 9000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(`${process.env.STRIPE_SECRET_KEY}`);
 
 // middleware
 app.use(cors());
@@ -30,6 +31,7 @@ async function run() {
     const db = client.db("blood_donation_db");
     const userCollection = db.collection("users");
     const bloodRequestCollection = db.collection("bloodRequest");
+    const donationFundSCollection = db.collection("donationFunds");
 
     // users related api's start
 
@@ -182,7 +184,6 @@ async function run() {
     // [DonateBloodCard.jsx]
     app.patch("/update-donation-status/:id", async (req, res) => {
       const id = req.params.id;
-      console.log(id);
       const query = { _id: new ObjectId(id) };
       const update = {
         $set: {
@@ -199,6 +200,91 @@ async function run() {
       const query = { _id: new ObjectId(id) };
       const result = await bloodRequestCollection.deleteOne(query);
       res.send(result);
+    });
+
+    // [FundingPage.jsx]
+    app.get("/donation-funds-data", async (req, res) => {
+      const email = req?.query?.email;
+      const query = {};
+      if (email) {
+        query.user_email = email;
+      }
+      const options = { sort: { donate_date: -1 } };
+
+      const result = await donationFundSCollection
+        .find(query, options)
+        .toArray();
+      res.send(result);
+    });
+
+    // [FundingPage.jsx]
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req?.body;
+      const donationAmount = parseInt(paymentInfo?.donation_amount) * 100;
+      const donorEmail = paymentInfo?.donor_email;
+      const name = paymentInfo?.name;
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: donationAmount,
+              product_data: {
+                name: `Hey! ${name} donated funds, fueling the mission to save lives`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        customer_email: donorEmail,
+        mode: "payment",
+        metadata: {
+          user_name: name,
+        },
+        success_url: `${process.env.DOMAIN_LINK}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.DOMAIN_LINK}/dashboard/payment-cancelled`,
+      });
+      // console.log(session)
+      res.send({ url: session.url });
+    });
+
+    // [PaymentSuccessful.jsx];
+    app.post("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      if (!session) {
+        return res.status(400).send({ error: "Invalid session" });
+      }
+
+      const transactionId = session?.payment_intent;
+      const query = { transactionId };
+      const transactionIdExit = await donationFundSCollection.findOne(query);
+      if (transactionIdExit) {
+        return res.send({
+          message: "already exists",
+          transactionId: session?.payment_intent,
+        });
+      }
+
+      if (session.payment_status === "paid") {
+        const paymentInfo = {
+          amount: session?.amount_total,
+          name: session?.metadata?.user_name,
+          user_email: session?.customer_email,
+          transactionId: session?.payment_intent,
+          donate_date: new Date().toLocaleString(),
+        };
+
+        const result = await donationFundSCollection.insertOne(paymentInfo);
+        res.send({
+          success: true,
+          transactionId: session?.payment_intent,
+        });
+        return;
+      }
+      res.send({ session: false });
     });
     // --------------------------------------------------------------------
 
