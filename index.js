@@ -184,17 +184,20 @@ async function run() {
     // [DonateBloodCard.jsx]
     app.patch("/update-donation-status/:id", async (req, res) => {
       const id = req.params.id;
+      const bloodDonorInfo = req.body;
       const query = { _id: new ObjectId(id) };
       const update = {
         $set: {
           donation_status: "inprogress",
+          blood_donor_name: bloodDonorInfo?.bloodDonorName,
+          blood_donor_email: bloodDonorInfo?.bloodDonorEmail,
         },
       };
       const result = await bloodRequestCollection.updateOne(query, update);
       res.send(result);
     });
 
-    // [UpdateDonarReqData.jsx]
+    // [UpdateDonarReqData.jsx] & [ALlBloodDonationRequest.jsx]
     app.delete("/create-donation-request/:id", async (req, res) => {
       const id = req?.params?.id;
       const query = { _id: new ObjectId(id) };
@@ -286,6 +289,29 @@ async function run() {
       }
       res.send({ session: false });
     });
+
+    // [ALlBloodDonationRequest.jsx]
+    app.patch("/mark-done-cancel/:id", async (req, res) => {
+      const status = req.body;
+      const toUpdate = status?.donation_status;
+      if (toUpdate) {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            donation_status: status?.donation_status,
+          },
+        };
+        const result = await bloodRequestCollection.updateOne(query, update);
+        return res.send({
+          success: true,
+          message: `Donation status updated to "${toUpdate}"`,
+          data: result,
+        });
+      }
+      res.send({ message: "Operation Field" });
+    });
+
     // --------------------------------------------------------------------
 
     await client.db("admin").command({ ping: 1 });
