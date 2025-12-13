@@ -5,9 +5,20 @@ require("dotenv").config();
 const port = process.env.PORT || 9000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(`${process.env.STRIPE_SECRET_KEY}`);
+const admin = require("firebase-admin");
+const serviceAccount = require(`./blood-donation-firebase-adminsdk.json`);
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
-// middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "https://blood-donation-99e54.web.app"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.v3edin0.mongodb.net/?appName=Cluster0`;
@@ -20,13 +31,32 @@ const client = new MongoClient(uri, {
   },
 });
 
+const verifyFirebaseToken = async (req, res, next) => {
+  const token = req?.headers?.authorization;
+
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+
+  try {
+    const accessToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(accessToken);
+    req.Token_email = decoded?.email;
+    next();
+  } catch (err) {
+    res.status(401).send({ message: "unauthorized access" });
+  }
+
+  // console.log(accessToken);
+};
+
 app.get("/", (req, res) => {
   res.send("Blood donation apps server is running");
 });
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     // --------------------------------------------------------------------
     const db = client.db("blood_donation_db");
     const userCollection = db.collection("users");
@@ -52,14 +82,14 @@ async function run() {
       if (email) {
         query.email = email;
       }
+
       const result = await userCollection.find(query).toArray();
       res.send(result);
     });
 
-    app.patch("/users/:id", async (req, res) => {
+    app.patch("/users/:id", verifyFirebaseToken, async (req, res) => {
       const id = req?.params?.id;
       const data = req?.body;
-
       const filter = { _id: new ObjectId(id) };
       const update = {
         $set: {
@@ -74,7 +104,7 @@ async function run() {
     });
 
     // [AllUser.jsx] update status
-    app.patch("/user/status/:id", async (req, res) => {
+    app.patch("/user/status/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const { status } = req.body;
       const query = { _id: new ObjectId(id) };
@@ -88,7 +118,7 @@ async function run() {
     });
 
     // [AllUser.jsx] update role
-    app.patch("/user/role/:id", async (req, res) => {
+    app.patch("/user/role/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const { role } = req.body;
       const query = { _id: new ObjectId(id) };
@@ -103,24 +133,30 @@ async function run() {
     // users related api's end
 
     // [CreateDonationRequest.jsx]
-    app.post("/create-donation-request", async (req, res) => {
-      const data = req?.body;
-      const user_email = req?.body?.user_email;
+    app.post(
+      "/create-donation-request",
 
-      // validate the user status start
-      const query = { email: user_email };
-      const userData = await userCollection.findOne(query);
-      if (userData?.status !== "active") {
-        return res.send({
-          message: "You are not able to create any donation request",
-        });
+      async (req, res) => {
+        const data = req?.body;
+        const user_email = req?.body?.user_email;
+
+        const query = { email: user_email };
+        const userData = await userCollection.findOne(query);
+
+        // validate the user status(active,block) start
+        if (userData?.status !== "active") {
+          return res.send({
+            message: "You are not able to create any donation request",
+          });
+        }
+        // validate the user status end
+
+        data.donation_status = "pending";
+        data.createdAt = new Date();
+        const result = await bloodRequestCollection.insertOne(data);
+        res.send(result);
       }
-      // validate the user status end
-      data.donation_status = "pending";
-      data.createdAt = new Date();
-      const result = await bloodRequestCollection.insertOne(data);
-      res.send(result);
-    });
+    );
 
     // [DonarHome.jsx]
     app.get("/create-donation-request", async (req, res) => {
@@ -138,16 +174,31 @@ async function run() {
     });
 
     // [MyDonationRequest.jsx]
-    app.get("/create-donation-request/all-data", async (req, res) => {
-      const email = req?.query?.email;
-      const query = {};
-      if (email) {
-        query.user_email = email;
+    app.get(
+      "/create-donation-request/all-data",
+      verifyFirebaseToken,
+
+      async (req, res) => {
+        const email = req?.query?.email;
+
+        const query = {};
+        if (email) {
+          query.user_email = email;
+
+          // token work start
+          const token_email = req.Token_email;
+          if (email !== token_email) {
+            return res.status(403).send({ message: "forbidden access" });
+          }
+          // token work end
+        }
+        const option = { sort: { createdAt: -1 } };
+        const result = await bloodRequestCollection
+          .find(query, option)
+          .toArray();
+        res.send(result);
       }
-      const option = { sort: { createdAt: -1 } };
-      const result = await bloodRequestCollection.find(query, option).toArray();
-      res.send(result);
-    });
+    );
 
     // [UpdateDonarReqData.jsx]
     app.get("/create-donation-request/:id", async (req, res) => {
@@ -158,67 +209,64 @@ async function run() {
     });
 
     // [UpdateDonarReqData.jsx]
-    app.patch("/create-donation-request/:id", async (req, res) => {
-      const id = req.params.id;
-      const data = req.body;
+    app.patch(
+      "/create-donation-request/:id",
 
-      const query = { _id: new ObjectId(id) };
+      async (req, res) => {
+        const id = req.params.id;
+        const data = req.body;
 
-      const update = {
-        $set: {
-          recipient_name: data?.recipient_name,
-          recipient_blood_group: data?.recipient_blood_group,
-          hospital_name: data?.hospital_name,
-          recipient_district: data?.recipient_district,
-          recipient_upazila: data?.recipient_upazila,
-          donation_date: data?.donation_date,
-          donation_time: data?.donation_time,
-          recipient_full_address: data?.recipient_full_address,
-          request_message: data?.request_message,
-        },
-      };
-      const result = await bloodRequestCollection.updateOne(query, update);
-      res.send(result);
-    });
+        const query = { _id: new ObjectId(id) };
+
+        const update = {
+          $set: {
+            recipient_name: data?.recipient_name,
+            recipient_blood_group: data?.recipient_blood_group,
+            hospital_name: data?.hospital_name,
+            recipient_district: data?.recipient_district,
+            recipient_upazila: data?.recipient_upazila,
+            donation_date: data?.donation_date,
+            donation_time: data?.donation_time,
+            recipient_full_address: data?.recipient_full_address,
+            request_message: data?.request_message,
+          },
+        };
+        const result = await bloodRequestCollection.updateOne(query, update);
+        res.send(result);
+      }
+    );
 
     // [DonateBloodCard.jsx]
-    app.patch("/update-donation-status/:id", async (req, res) => {
-      const id = req.params.id;
-      const bloodDonorInfo = req.body;
-      const query = { _id: new ObjectId(id) };
-      const update = {
-        $set: {
-          donation_status: "inprogress",
-          blood_donor_name: bloodDonorInfo?.bloodDonorName,
-          blood_donor_email: bloodDonorInfo?.bloodDonorEmail,
-        },
-      };
-      const result = await bloodRequestCollection.updateOne(query, update);
-      res.send(result);
-    });
+    app.patch(
+      "/update-donation-status/:id",
+
+      async (req, res) => {
+        const id = req.params.id;
+        const bloodDonorInfo = req.body;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            donation_status: "inprogress",
+            blood_donor_name: bloodDonorInfo?.bloodDonorName,
+            blood_donor_email: bloodDonorInfo?.bloodDonorEmail,
+          },
+        };
+        const result = await bloodRequestCollection.updateOne(query, update);
+        res.send(result);
+      }
+    );
 
     // [UpdateDonarReqData.jsx] & [ALlBloodDonationRequest.jsx]
-    app.delete("/create-donation-request/:id", async (req, res) => {
-      const id = req?.params?.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await bloodRequestCollection.deleteOne(query);
-      res.send(result);
-    });
+    app.delete(
+      "/create-donation-request/:id",
 
-    // [FundingPage.jsx]
-    app.get("/donation-funds-data", async (req, res) => {
-      const email = req?.query?.email;
-      const query = {};
-      if (email) {
-        query.user_email = email;
+      async (req, res) => {
+        const id = req?.params?.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await bloodRequestCollection.deleteOne(query);
+        res.send(result);
       }
-      const options = { sort: { donate_date: -1 } };
-
-      const result = await donationFundSCollection
-        .find(query, options)
-        .toArray();
-      res.send(result);
-    });
+    );
 
     // [FundingPage.jsx]
     app.post("/create-checkout-session", async (req, res) => {
@@ -271,7 +319,7 @@ async function run() {
         });
       }
 
-      if (session.payment_status === "paid") {
+      if (session?.payment_status === "paid") {
         const paymentInfo = {
           amount: session?.amount_total,
           name: session?.metadata?.user_name,
@@ -280,14 +328,33 @@ async function run() {
           donate_date: new Date().toLocaleString(),
         };
 
-        const result = await donationFundSCollection.insertOne(paymentInfo);
-        res.send({
-          success: true,
-          transactionId: session?.payment_intent,
-        });
-        return;
+        try {
+          await donationFundSCollection.insertOne(paymentInfo);
+          res.send({ success: true, transactionId });
+        } catch (error) {
+          if (error.code === 11000) {
+            return res.send({
+              message: "already exists",
+              transactionId,
+            });
+          }
+        }
       }
       res.send({ session: false });
+    });
+
+    // [FundingPage.jsx]
+    app.get("/donation-funds-data", async (req, res) => {
+      const email = req?.query?.email;
+      const query = {};
+      if (email) {
+        query.user_email = email;
+      }
+      const result = await donationFundSCollection
+        .find(query)
+        .sort({ donate_date: -1 })
+        .toArray();
+      res.send(result);
     });
 
     // [ALlBloodDonationRequest.jsx]
@@ -314,7 +381,7 @@ async function run() {
 
     // --------------------------------------------------------------------
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
