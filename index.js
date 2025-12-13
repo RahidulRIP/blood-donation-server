@@ -387,6 +387,6 @@ async function run() {
 }
 run().catch(console.dir);
 
-app.listen(port, () => {
-  console.log(`Blood donation apps server is running from ${port}`);
-});
+// app.listen(port, () => {
+//   console.log(`Blood donation apps server is running from ${port}`);
+// });
