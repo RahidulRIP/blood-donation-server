@@ -174,10 +174,8 @@ async function run() {
     });
 
     // [MyDonationRequest.jsx]
-    app.get(
-      "/create-donation-request/all-data",
+    app.get( "/create-donation-request/all-data",
       verifyFirebaseToken,
-
       async (req, res) => {
         const email = req?.query?.email;
 
