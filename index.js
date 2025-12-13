@@ -46,8 +46,6 @@ const verifyFirebaseToken = async (req, res, next) => {
   } catch (err) {
     res.status(401).send({ message: "unauthorized access" });
   }
-
-  // console.log(accessToken);
 };
 
 app.get("/", (req, res) => {
